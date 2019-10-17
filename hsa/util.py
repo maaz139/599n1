@@ -1,18 +1,39 @@
+
+class Header:
+  def __init__(self,srcIp,dstIp,srcPort,dstPort,prtcl):
+    self.srcIp = srcIp
+    self.dstIp = dstIp
+    self.srcPort = srcPort
+    self.dstPort = dstPort
+    self.protocol = prtcl
+  def __key(self):
+    return (self.srcIp,self.dstIp,self.srcPort,self.dstPort,self.protocol)
+  def __hash__(self):
+    return hash(self.__key())
+  def __eq__(self, other):
+    if isinstance(other, Header):
+        return self.__key() == other.__key()
+    return NotImplemented
+
 class Rule:
   '''
   A class implementing a rule in the acl.
   '''
 
-  def __init__(self, srcip, dstip, srcport, dstport, prtcl, action):
-    self.srcIp = srcip
-    self.dstIp = dstip
-    self.srcPort = srcport
-    self.dstPort = dstport
-    self.protocol = prtcl
-    self.action = action
+  def __init__(self, rdict):
+    self.srcIp = ip_to_wce(rdict["SrcIp"])
+    self.dstIp = ip_to_wce(rdict["DstIp"])
+    self.srcPort = port_to_tuple(rdict["SrcPort"])
+    self.dstPort = port_to_tuple(rdict["DstPort"])
+    self.protocol = protocol_to_tuple(rdict["Protocol"])
+    self.action = rdict["Action"]
 
-  def matches(self, srcip, dstip, srcport, dstport, prtcl):
-    return False
+  def matches(self, h):
+    return wce_match_against_decimal_ip(self.srcIp, h.srcIp) and \
+           wce_match_against_decimal_ip(self.dstIp, h.dstIp) and \
+           match_range(self.srcPort, h.srcPort) and \
+           match_range(self.dstPort, h.dstPort) and \
+           match_range(self.protocol, h.protocol)
 
   def __str__(self):
     return "(" + str(self.srcIp) + ", " \
@@ -40,16 +61,13 @@ class Acl:
     self.rules = []
 
     for rule in acl["Rules"]:
-      srcIp = ip_to_wce(rule["SrcIp"])
-      dstIp = ip_to_wce(rule["DstIp"])
-      srcPort = port_to_tuple(rule["SrcPort"])
-      dstPort = port_to_tuple(rule["DstPort"])
-      protocol = protocol_to_tuple(rule["Protocol"])
-      action = rule["Action"]
-      self.rules.append(Rule(srcIp, dstIp, srcPort, dstPort, protocol, action))
+      self.rules.append(Rule(rule))
 
   def __call__(self, hs):
-    pass# TODO
+    for r in self.rules:
+      if r.matches(hs):
+        return r.action
+    return self.default
 
   def __str__(self):
     return self.name
@@ -67,8 +85,9 @@ class RTEntry:
     self.prefix_size = size
     self.interface = interface
 
-  def matches(self, dst):
-    return False
+  def matches(self, header):
+    wce_dst = ip_to_wce(header.dstIp + "/32")
+    return wce_match(wce_dst, self.prefix)
 
   def __str__(self):
     return "(" + str(self.prefix) + ", " \
@@ -85,14 +104,20 @@ class ForwardingTable:
   '''
 
   def __init__(self, table):
+    self.ft = []
     for entry in table:
       prefix = ip_to_wce(entry["Prefix"])
       prefix_size = int(entry["Prefix"].split("/")[1])
       interface = entry["Interface"]
-      ft.append(RTEntry(prefix, prefix_size, interface))
+      self.ft.append(RTEntry(prefix, prefix_size, interface))
+    # store routing rules by prefix length so we can easily do longest prefix matching
+    self.ft = sorted(self.ft, key=get_prefix_size)
 
   def __call__(self, hs):
-    pass# TODO
+    for rte in self.ft:
+      if rte.matches(hs):
+        return set([rte.interface])
+    return set()
 
   def __str__(self):
     return self.name
@@ -114,7 +139,23 @@ def ip_to_wce(ip_str):
   return wce
 
 def protocol_to_tuple(protocol_str):
-  return tuple(protocol_str.split("-"))
+  return tuple([int(p) for p in protocol_str.split("-")])
 
 def port_to_tuple(port_str):
-  return tuple(port_str.split("-"))
+  return tuple([int(p) for p in port_str.split("-")])
+
+def match_range(range,val):
+  return range[0] <= val and range[1] >= val
+
+def get_prefix_size(rte):
+  return rte.prefix_size
+
+def bit_match(b1,b2):
+  return b1 == b2 or b1 == 'x' or b2 == 'x'
+
+def wce_match(wce1, wce2):
+  return all([bit_match(z[0],z[1]) for z in zip(wce1,wce2)])
+
+def wce_match_against_decimal_ip(wce1, ip):
+    wce_ip = ip_to_wce(ip + "/32")
+    return wce_match(wce_ip, wce1)
