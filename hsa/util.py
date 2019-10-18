@@ -159,3 +159,46 @@ def wce_match(wce1, wce2):
 def wce_match_against_decimal_ip(wce1, ip):
     wce_ip = ip_to_wce(ip + "/32")
     return wce_match(wce_ip, wce1)
+
+# Set operators for wildcard headers
+def wce_intersection(wce1, wce2):
+  # A intersect empty set = empty set
+  if len(wce1) == 0 or len(wce2) == 0:
+    return list()
+  res = list()
+  for zipped_e in zip(wce1,wce2):
+    e1 = zipped_e[0]
+    e2 = zipped_e[1]
+    def bit_intersect(b1, b2):
+      if b1 == 'x':
+        return b2
+      elif b2 == 'x':
+        return b1
+      elif b1 == b2:
+        return b1
+      else:
+        return 'z'
+    new_wce = "".join([bit_intersect(z[0],z[1]) for z in zip(e1, e2)])
+    if 'z' not in new_wce:
+      res.append(new_wce)
+  return res
+
+# some unions can be simplified, leave that for later
+def wce_union(wce1, wce2):
+  return wce1 + wce2
+
+def wce_complement(wce):
+  res = list()
+  for e in wce:
+    for idx in range(len(e)):
+      if e[idx] != 'x':
+        comp = ['x'] * len(e)
+        if e[idx] == '1':
+          comp[idx] = '0'
+        else:
+          comp[idx] = '1'
+        res.append("".join(comp))
+  return res
+
+def wce_difference(wce1, wce2):
+  return wce_intersection(wce1,wce_complement(wce2))

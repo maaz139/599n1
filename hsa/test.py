@@ -62,5 +62,15 @@ class TestUtil(unittest.TestCase):
     self.assertEqual(len(psi_output), 1)
     self.assertEqual(gamma(list(psi_output)[0]), set([tuple([header3, "r2@Eth1"])]))
 
+  def test_wce_intersection(self):
+    self.assertEqual(wce_intersection(['101x'],['10xx']), list(['101x']))
+    self.assertEqual(wce_intersection(['101x'], ['111x']), list())
+
+  def test_wce_union(self):
+    self.assertEqual(wce_union(['01xx'], ['111x']), ['01xx', '111x'])
+
+  def test_wce_complement(self):
+    self.assertEqual(wce_complement(['01x']), ['1xx','x0x'])
+
 if __name__ == '__main__':
   unittest.main()
