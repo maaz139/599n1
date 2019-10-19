@@ -16,12 +16,16 @@ class Header:
             #  self.protocol == other.protocol
     else:
       return False
+  
   def __str__(self):
     return "(" + str(self.srcIp) + ", " \
                + str(self.dstIp) + ", " \
                + str(self.srcPort) + ", " \
                + str(self.dstPort) + ", " \
                + str(self.protocol) + ", "
+
+  def __repr__(self):
+    return str(self)
 
   def __ne__(self,other):
     return not self.__eq__(other)
@@ -162,9 +166,19 @@ class ForwardingTable:
       self.ft.append(RTEntry(prefix, prefix_size, interface))
     # store routing rules by prefix length so we can easily do longest prefix matching
     sorted_rte = sorted(self.ft, key=get_prefix_size)
-    sorted_rte.reverse()
-    self.ft = sorted_rte
-
+    sorted_rte_2 = []
+    temp = []
+    prev = None
+    for rte in sorted_rte:
+      if prev != rte.prefix_size:
+        prev = rte.prefix_size
+        sorted_rte_2 = temp + sorted_rte_2
+        temp = []
+      
+      temp.append(rte)
+    sorted_rte_2 = temp + sorted_rte_2
+    self.ft = sorted_rte_2
+    
   def __call__(self, hs):
     for rte in self.ft:
       if rte.matches(hs):
@@ -182,12 +196,23 @@ class ForwardingTable:
     # relies on RTEs being sorted by prefix
     for rte in self.ft:
       h.dstIp = compls
+      #print "Forwarding rule:", rte
       hprime = rte.sym_matches(h)
+      #print "Matched packets:", hprime, "\n"
       # if header can't reach this rule, we can ignore it
       if not is_empty_sym_header(hprime):
         res.append(tuple([hprime, rte.interface]))
         compls = wce_intersection(compls, wce_complement(set(["".join(rte.prefix)])))
     return res
+
+  def __str__(self):
+    res = ""
+    for rule in self.ft:
+      res = res + str(rule) + "\n"
+    return res
+
+  def __repr__(self):
+    return str(self)
 
 
 ## Util methods ##

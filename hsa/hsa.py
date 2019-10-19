@@ -72,7 +72,6 @@ class TransferFunctions:
   def sym_call(self, networkSpacePoint):
     header = networkSpacePoint[0]
     switch = networkSpacePoint[1]
-    outgoing = set()
     if self.inBoundAcls.has_key(switch) and self.inBoundAcls[switch] is not None:
       inbound_acl_headers = self.inBoundAcls[switch].sym_check(header)
       if len(inbound_acl_headers) == 0:
@@ -83,6 +82,7 @@ class TransferFunctions:
     rt = self.routingTable[switch]
     for h in inbound_acl_headers:
       forwarding_points = forwarding_points + rt.sym_forward(h)
+    #print "##", forwarding_points
     outgoing = []
     for p in forwarding_points:
       if self.outBoundAcls.has_key(p[1]) and self.outBoundAcls[p[1]] is not None:
@@ -91,6 +91,7 @@ class TransferFunctions:
           outgoing.append(tuple([h,p[1]]))
       else:
         outgoing.append(p)
+    #print "##", outgoing
     return outgoing
 
   def check_inbound_acl(self, header, switch):
