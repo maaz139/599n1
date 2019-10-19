@@ -23,13 +23,15 @@ class TopologyFunction:
             self.topology[i['Name']] = set([i['Neighbor']])
 
   # take one header/switch tuple, return set of header/switch tuples
-  def __call__(self, networkSpacePoint):
-    header = networkSpacePoint[0]
-    switch = networkSpacePoint[1]
-    if self.topology.has_key(switch):
-      return set([tuple([header, p]) for p in self.topology[switch]])
-    else:
-      return set()
+  def __call__(self, networkSpacePoints):
+    res = []
+    for networkSpacePoint in networkSpacePoints:
+      header = networkSpacePoint[0]
+      switch = networkSpacePoint[1]
+      if self.topology.has_key(switch):
+        for p in self.topology[switch]:
+          res.append(tuple([header,p]))
+    return res
 
 
 class TransferFunctions:
@@ -71,7 +73,7 @@ class TransferFunctions:
     header = networkSpacePoint[0]
     switch = networkSpacePoint[1]
     outgoing = set()
-    if self.inBoundAcls[switch] is not None:
+    if self.inBoundAcls.has_key(switch) and self.inBoundAcls[switch] is not None:
       inbound_acl_headers = self.inBoundAcls[switch].sym_check(header)
       if len(inbound_acl_headers) == 0:
         return set()
@@ -83,7 +85,7 @@ class TransferFunctions:
       forwarding_points = forwarding_points + rt.sym_forward(h)
     outgoing = []
     for p in forwarding_points:
-      if self.outBoundAcls[p[1]] is not None:
+      if self.outBoundAcls.has_key(p[1]) and self.outBoundAcls[p[1]] is not None:
         outbound_acl_headers = self.outBoundAcls[p[1]].sym_check(p[0])
         for h in outbound_acl_headers:
           outgoing.append(tuple([h,p[1]]))

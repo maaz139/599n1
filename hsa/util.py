@@ -203,6 +203,12 @@ def ip_to_wce(ip_str):
   
   return wce
 
+def ip_to_wce_set(ip_str):
+  if "/" not in ip_str:
+    ip_str = ip_str + "/32"
+  wce = ip_to_wce(ip_str)
+  return set(["".join(wce)])
+
 def protocol_to_tuple(protocol_str):
   return tuple([int(p) for p in protocol_str.split("-")])
 
