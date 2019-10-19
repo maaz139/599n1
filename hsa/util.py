@@ -53,6 +53,11 @@ class Rule:
            match_range(self.dstPort, h.dstPort) and \
            match_range(self.protocol, h.protocol)
 
+  def sym_matches(self, h):
+    matching_srcIp = wce_intersection(h.srcIp, set(["".join(self.srcIp)]))
+    matching_dstIp = wce_intersection(h.dstIp, set(["".join(self.dstIp)]))
+    return Header(matching_srcIp, matching_dstIp, h.srcPort, h.dstPort, h.protocol)
+
   def __str__(self):
     return "(" + str(self.srcIp) + ", " \
                + str(self.dstIp) + ", " \
@@ -86,6 +91,26 @@ class Acl:
       if r.matches(hs):
         return r.action
     return self.default
+
+  def sym_check(self,hs):
+    res = []
+    srcCompls = hs.srcIp
+    dstCompls = hs.dstIp
+    for r in self.rules:
+      hs.srcIp = srcCompls
+      hs.dstIp = dstCompls
+      hprime = r.sym_matches(hs)
+      if not is_empty_sym_header(hprime):
+        if r.action == "Allow":
+          res.append(hprime)
+        srcCompls = wce_intersection(srcCompls,wce_complement(set(["".join(r.srcIp)])))
+        dstCompls = wce_intersection(dstCompls,wce_complement(set(["".join(r.dstIp)])))
+    if self.default == "Allow" and len(srcCompls) != 0 and len(dstCompls) != 0:
+      hs.srcIp = srcCompls
+      hs.dstIp = dstCompls
+      res.append(hs)
+    return res
+
 
   def __str__(self):
     return self.name
@@ -160,7 +185,6 @@ class ForwardingTable:
       hprime = rte.sym_matches(h)
       # if header can't reach this rule, we can ignore it
       if not is_empty_sym_header(hprime):
-        hprime.dstIp = wce_intersection(hprime.dstIp,compls)
         res.append(tuple([hprime, rte.interface]))
         compls = wce_intersection(compls, wce_complement(set(["".join(rte.prefix)])))
     return res

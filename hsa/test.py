@@ -48,12 +48,27 @@ class TestUtil(unittest.TestCase):
     self.assertFalse(rule.matches(Header("70.4.194.22", "255.0.0.2", 10000000, 5, 5)))
     self.assertFalse(rule.matches(Header("70.4.194.22", "255.0.0.2", 5, 10000000, 5)))
 
+  def test_sym_acl_rule(self):
+    rule = Rule(network_config['Devices'][0]['Acls'][0]['Rules'][0])
+    h = make_new_sym_header()
+    h.srcIp = set(["".join(rule.srcIp)])
+    h.dstIp = set(["".join(rule.dstIp)])
+    self.assertEqual(rule.sym_matches(make_new_sym_header()), h)
+
+
   def test_acl(self):
     acl = Acl(network_config['Devices'][0]['Acls'][0])
     self.assertEqual(acl(Header("70.4.194.22", "255.0.0.2", 5, 5, 5)), "Allow")
     self.assertEqual(acl(Header("70.4.4.22", "255.0.0.2", 5, 5, 5)), "Deny")
     self.assertEqual(acl(Header("70.4.194.22", "255.0.0.2", 10000000, 5, 5)), "Deny")
     self.assertEqual(acl(Header("70.4.194.22", "255.0.0.2", 5, 10000000, 5)), "Deny")
+
+  def test_sym_acl(self):
+    acl = Acl(network_config['Devices'][0]['Acls'][0])
+    allowed_sets = acl.sym_check(make_new_sym_header())
+    self.assertEqual(len(allowed_sets), 1)
+    self.assertEqual(allowed_sets[0].dstIp, set(['x'*32]))
+    self.assertEqual(allowed_sets[0].srcIp, set(["".join(ip_to_wce("70.4.194.0/24"))]))
 
   def test_transfer_function(self):
     psi = TransferFunctions(network_config)
@@ -67,6 +82,10 @@ class TestUtil(unittest.TestCase):
     self.assertEqual(psi.routingTable["r1@Eth1"](header3), set(["r1@Eth1"]))
     self.assertEqual(psi.check_outbound_acl(header3, "r1@Eth1"), "Allow")
     self.assertEqual(psi(tuple([header3,"r1@Eth1"])), set([tuple([header3,"r1@Eth1"])]))
+
+  def test_sym_transfer_function(self):
+    sym_psi = TransferFunctions(network_config)
+    output = sym_psi.sym_call(tuple([make_new_sym_header(),"r1@Eth1"]))
 
   def test_one_hop(self):
     gamma = TopologyFunction(network_config)
