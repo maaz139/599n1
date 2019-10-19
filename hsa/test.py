@@ -2,7 +2,7 @@ import unittest
 import sys
 import yaml
 
-from util import Header, Rule, Acl, RTEntry, ForwardingTable, ip_to_wce
+from util import *
 from hsa import TopologyFunction, TransferFunctions
 
 network_config = open("network.yml", "r").read();
@@ -22,11 +22,24 @@ class TestUtil(unittest.TestCase):
 
   def test_routing_table_entry(self):
     rte = RTEntry(ip_to_wce("70.4.193.0/24"), "24", "r4:Eth3")
-    self.assertTrue(rte.matches(header2))
+    self.assertEqual(rte.sym_matches(make_new_sym_header()), Header(set(['x'*32]),set(["".join(rte.prefix)]),tuple([0,1000000]),tuple([0,1000000]),tuple([0,1000000])))
+    rte = RTEntry(ip_to_wce("128.0.0.0/8"),"8","test1")
+    pass1 = rte.sym_matches(make_new_sym_header())
+    self.assertEqual(pass1, Header(set(['x'*32]), set(["".join(ip_to_wce("128.0.0.0/8"))]),tuple([0,1000000]),tuple([0,1000000]),tuple([0,1000000])))
+    rte2 = RTEntry(ip_to_wce("128.255.0.0/16"),"16","test2")
+    pass2 = rte2.sym_matches(pass1)
+    self.assertEqual(pass2,Header(set(['x'*32]), set(["".join(ip_to_wce("128.255.0.0/16"))]),tuple([0,1000000]),tuple([0,1000000]),tuple([0,1000000])))
+    rte3 = RTEntry(ip_to_wce("70.4.182.0/24"),"24","test3")
+    pass3 = rte3.sym_matches(pass2)
+    self.assertEqual(pass3,Header(set(['x'*32]), set(),tuple([0,1000000]),tuple([0,1000000]),tuple([0,1000000])))
+    self.assertTrue(is_empty_sym_header(pass3))
 
   def test_forwarding_table(self):
     forwardingtable = ForwardingTable(network_config['Devices'][0]['ForwardingTable'])
-    self.assertTrue(forwardingtable(header2), set("r1@Eth0"))
+    forwardspace = forwardingtable.sym_forward(make_new_sym_header())
+    # 70.4.194.22 should be forwarded to r1@Eth0
+    self.assertTrue(any([hp[1] == "r1@Eth0" and e_in_wce("".join(ip_to_wce("70.4.194.22/32")),hp[0].dstIp) for hp in forwardspace]))
+
 
   def test_acl_rule(self):
     rule = Rule(network_config['Devices'][0]['Acls'][0]['Rules'][0])
@@ -63,14 +76,17 @@ class TestUtil(unittest.TestCase):
     self.assertEqual(gamma(list(psi_output)[0]), set([tuple([header3, "r2@Eth1"])]))
 
   def test_wce_intersection(self):
-    self.assertEqual(wce_intersection(['101x'],['10xx']), list(['101x']))
-    self.assertEqual(wce_intersection(['101x'], ['111x']), list())
+    self.assertEqual(wce_intersection(set(['101x']),set(['10xx'])), set(['101x']))
+    self.assertEqual(wce_intersection(set(['101x']), set(['111x'])), set())
+    self.assertEqual(wce_intersection(set(['xxxx']), set(['11xx'])), set(['11xx']))
 
   def test_wce_union(self):
-    self.assertEqual(wce_union(['01xx'], ['111x']), ['01xx', '111x'])
+    self.assertEqual(wce_union(set(['01xx']), set(['111x'])), set(['01xx', '111x']))
 
   def test_wce_complement(self):
-    self.assertEqual(wce_complement(['01x']), ['1xx','x0x'])
+    self.assertEqual(wce_complement(set(['01x'])), set(['1xx','x0x']))
+    self.assertEqual(wce_complement(set()), set(['x' * 32]))
+    self.assertEqual(wce_complement(set(['x' * 32])), set())
 
 if __name__ == '__main__':
   unittest.main()

@@ -6,14 +6,32 @@ class Header:
     self.srcPort = srcPort
     self.dstPort = dstPort
     self.protocol = prtcl
-  def __key(self):
-    return (self.srcIp,self.dstIp,self.srcPort,self.dstPort,self.protocol)
-  def __hash__(self):
-    return hash(self.__key())
+
   def __eq__(self, other):
     if isinstance(other, Header):
-        return self.__key() == other.__key()
-    return NotImplemented
+        return self.srcIp == other.srcIp and \
+              self.dstIp == other.dstIp #and \
+            #  self.srcPort == other.srcPort and \
+            #  self.dstPort == other.dstPort and \
+            #  self.protocol == other.protocol
+    else:
+      return False
+  def __str__(self):
+    return "(" + str(self.srcIp) + ", " \
+               + str(self.dstIp) + ", " \
+               + str(self.srcPort) + ", " \
+               + str(self.dstPort) + ", " \
+               + str(self.protocol) + ", "
+
+  def __ne__(self,other):
+    return not self.__eq__(other)
+
+def make_new_sym_header():
+  return Header(set(['x'*32]),set(['x'*32]),tuple([0,1000000]),tuple([0,1000000]),tuple([0,1000000]))
+
+# if srcIp or dstIp is empty set, no packet can reach this state
+def is_empty_sym_header(h):
+  return len(h.srcIp) == 0 or len(h.dstIp) == 0
 
 class Rule:
   '''
@@ -86,8 +104,15 @@ class RTEntry:
     self.interface = interface
 
   def matches(self, header):
-    wce_dst = ip_to_wce(header.dstIp + "/32")
-    return wce_match(wce_dst, self.prefix)
+    return wce_match(header.dstIp, self.prefix)
+
+  def sym_matches(self, h):
+    matching_dstIp = wce_intersection(h.dstIp,set(["".join(self.prefix)]))
+    return Header(h.srcIp, matching_dstIp, h.srcPort, h.dstPort, h.protocol)
+
+  def compl_sym_matches(self, h):
+    nonmatching_dstIp = wce_complement(wce_intersection(h.dstIp, set(["".join(self.prefix)])))
+    return Header(h.srcIp, nonmatching_dstIp, h.srcPort, h.dstPort, h.protocol)
 
   def __str__(self):
     return "(" + str(self.prefix) + ", " \
@@ -111,7 +136,9 @@ class ForwardingTable:
       interface = entry["Interface"]
       self.ft.append(RTEntry(prefix, prefix_size, interface))
     # store routing rules by prefix length so we can easily do longest prefix matching
-    self.ft = sorted(self.ft, key=get_prefix_size)
+    sorted_rte = sorted(self.ft, key=get_prefix_size)
+    sorted_rte.reverse()
+    self.ft = sorted_rte
 
   def __call__(self, hs):
     for rte in self.ft:
@@ -119,11 +146,25 @@ class ForwardingTable:
         return set([rte.interface])
     return set()
 
-  def __str__(self):
-    return self.name
+  # input is header
+  # output is list of header,switch pairs
+  # output header now defines set of packets that can be sent to that switch
+  def sym_forward(self,h):
+    res = []
+    # if we match a rule, it means we failed to match all previous rules
+    # so maintain an expression that is intersection of complements of previous rules
+    compls = h.dstIp
+    # relies on RTEs being sorted by prefix
+    for rte in self.ft:
+      h.dstIp = compls
+      hprime = rte.sym_matches(h)
+      # if header can't reach this rule, we can ignore it
+      if not is_empty_sym_header(hprime):
+        hprime.dstIp = wce_intersection(hprime.dstIp,compls)
+        res.append(tuple([hprime, rte.interface]))
+        compls = wce_intersection(compls, wce_complement(set(["".join(rte.prefix)])))
+    return res
 
-  def __repr__(self):
-    return str(self)
 
 ## Util methods ##
 def ip_to_wce(ip_str):
@@ -160,35 +201,39 @@ def wce_match_against_decimal_ip(wce1, ip):
     wce_ip = ip_to_wce(ip + "/32")
     return wce_match(wce_ip, wce1)
 
+def bit_intersect(b1, b2):
+  if b1 == 'x':
+    return b2
+  elif b2 == 'x':
+    return b1
+  elif b1 == b2:
+    return b1
+  else:
+    return 'z'
+
 # Set operators for wildcard headers
 def wce_intersection(wce1, wce2):
   # A intersect empty set = empty set
   if len(wce1) == 0 or len(wce2) == 0:
-    return list()
-  res = list()
-  for zipped_e in zip(wce1,wce2):
-    e1 = zipped_e[0]
-    e2 = zipped_e[1]
-    def bit_intersect(b1, b2):
-      if b1 == 'x':
-        return b2
-      elif b2 == 'x':
-        return b1
-      elif b1 == b2:
-        return b1
-      else:
-        return 'z'
-    new_wce = "".join([bit_intersect(z[0],z[1]) for z in zip(e1, e2)])
-    if 'z' not in new_wce:
-      res.append(new_wce)
+    return set()
+  res = set()
+  for e1 in wce1:
+    for e2 in wce2:
+      new_wce = "".join([bit_intersect(z[0],z[1]) for z in zip(e1, e2)])
+      if 'z' not in new_wce:
+        res.add(new_wce)
   return res
 
 # some unions can be simplified, leave that for later
 def wce_union(wce1, wce2):
-  return wce1 + wce2
+  return wce1.union(wce2)
 
 def wce_complement(wce):
-  res = list()
+  if len(wce) == 0:
+    return set(['x'*32])
+  if all([h == 'x'*32 for h in wce]):
+    return set()
+  res = set()
   for e in wce:
     for idx in range(len(e)):
       if e[idx] != 'x':
@@ -197,8 +242,11 @@ def wce_complement(wce):
           comp[idx] = '0'
         else:
           comp[idx] = '1'
-        res.append("".join(comp))
+        res.add("".join(comp))
   return res
 
 def wce_difference(wce1, wce2):
   return wce_intersection(wce1,wce_complement(wce2))
+
+def e_in_wce(e, wce):
+  return len(wce_intersection(set([e]), wce)) != 0
