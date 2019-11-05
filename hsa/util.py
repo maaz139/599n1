@@ -196,14 +196,14 @@ class ForwardingTable:
     # relies on RTEs being sorted by prefix
     for rte in self.ft:
       #h.dstIp = compls
-      print "Forwarding rule:", rte
+      print ("Forwarding rule:" + str(rte))
       hprime = rte.sym_matches(h)
-      print "Matched packets:", hprime.dstIp, "\n"
+      print ("Matched packets: " + str(hprime.dstIp) + "\n")
       # if header can't reach this rule, we can ignore it
       if not is_empty_sym_header(hprime):
         res.append(tuple([hprime, rte.interface]))
         #compls = wce_intersection(compls, wce_complement(set(["".join(rte.prefix)])))
-        print res, "\n"
+        print ("Updated Packet Set:\n" + str(res) + "\n")
     return res
 
   def __str__(self):

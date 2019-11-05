@@ -17,7 +17,7 @@ class TopologyFunction:
     for d in network['Devices']:
       for i in d['Interfaces']:
         if i['Neighbor'] is not None:
-          if self.topology.has_key(i['Name']):
+          if i['Name'] in self.topology:
             self.topology[i['Name']].add(i['Neighbor'])
           else:
             self.topology[i['Name']] = set([i['Neighbor']])
@@ -28,7 +28,7 @@ class TopologyFunction:
     for networkSpacePoint in networkSpacePoints:
       header = networkSpacePoint[0]
       switch = networkSpacePoint[1]
-      if self.topology.has_key(switch):
+      if switch in self.topology:
         for p in self.topology[switch]:
           res.append(tuple([header,p]))
     return res
@@ -70,23 +70,35 @@ class TransferFunctions:
     return outgoing
 
   def sym_call(self, networkSpacePoint):
+    print("=======================================================================================\n")
+    print ("#### APPLYING INGRESS ACLS ####\n")
     header = networkSpacePoint[0]
     switch = networkSpacePoint[1]
-    if self.inBoundAcls.has_key(switch) and self.inBoundAcls[switch] is not None:
+    if switch in self.inBoundAcls and self.inBoundAcls[switch] is not None:
       inbound_acl_headers = self.inBoundAcls[switch].sym_check(header)
       if len(inbound_acl_headers) == 0:
         return set()
     else:
       inbound_acl_headers = [header]
+
+    print("HEADER SPACE AFTER IN ACLS:\n" + str(inbound_acl_headers) + "\n")
+    print("=======================================================================================\n")
+
+    print ("#### FORWARDING PACKETS ####\n")
     forwarding_points = []
     rt = self.routingTable[switch]
     for h in inbound_acl_headers:
       forwarding_points = forwarding_points + rt.sym_forward(h)
-    print "##", forwarding_points
+    
+    print ("HEADER SPACE AFTER FORWARDING:\n" + str(forwarding_points) + "\n")
+    
+    print("=======================================================================================\n")
+    print ("#### APPLYING OUTGRESS ACLS ####\n")
+    
     outgoing = []
     for p in forwarding_points:
-      print p
-      if self.outBoundAcls.has_key(p[1]) and self.outBoundAcls[p[1]] is not None:
+      print (p)
+      if p[1] in self.outBoundAcls and self.outBoundAcls[p[1]] is not None:
         outbound_acl_headers = self.outBoundAcls[p[1]].sym_check(p[0])
         for h in outbound_acl_headers:
           outgoing.append(tuple([h,p[1]]))

@@ -15,8 +15,8 @@ def reachability(network, invariant, d):
   current_round = [init_point]
   next_round = []
   for i in range(d):
-    print "Reachability round " + str(i) 
-    print current_round#, "\n"
+    print ("############# REACHABILITY ROUND " + str(i) + " #############\n")
+    print ("Starting Packet Set:\n" + str(current_round) + "\n")#, "\n"
     
     for p in current_round:
       next_round = next_round + gamma(psi.sym_call(p))
@@ -25,7 +25,7 @@ def reachability(network, invariant, d):
       return True
     current_round = next_round
     next_round = []
-    asd
+    exit()
   return False
 
 def main():
@@ -46,9 +46,9 @@ def main():
     if not c == 0: c = c + 1; continue
     #print invariant
     if reachability(network_config,invariant,5) == solutions[c]:
-      print "Success: Invariant " + str(c) + "\n"
+      print ("Success: Invariant " + str(c) + "\n")
     else:
-      print "Failure: Invariant " + str(c) + "\n"
+      print ("Failure: Invariant " + str(c) + "\n")
     c = c + 1
         
   #invariant0 = invariants[0]
