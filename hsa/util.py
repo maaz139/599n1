@@ -144,7 +144,7 @@ class RTEntry:
     return Header(h.srcIp, nonmatching_dstIp, h.srcPort, h.dstPort, h.protocol)
 
   def __str__(self):
-    return "(" + str(self.prefix) + ", " \
+    return "(" + str("".join(self.prefix)) + ", " \
                + str(self.prefix_size) + ", " \
                + str(self.interface) + ")"
 
@@ -195,14 +195,15 @@ class ForwardingTable:
     compls = h.dstIp
     # relies on RTEs being sorted by prefix
     for rte in self.ft:
-      h.dstIp = compls
-      #print "Forwarding rule:", rte
+      #h.dstIp = compls
+      print "Forwarding rule:", rte
       hprime = rte.sym_matches(h)
-      #print "Matched packets:", hprime, "\n"
+      print "Matched packets:", hprime.dstIp, "\n"
       # if header can't reach this rule, we can ignore it
       if not is_empty_sym_header(hprime):
         res.append(tuple([hprime, rte.interface]))
-        compls = wce_intersection(compls, wce_complement(set(["".join(rte.prefix)])))
+        #compls = wce_intersection(compls, wce_complement(set(["".join(rte.prefix)])))
+        print res, "\n"
     return res
 
   def __str__(self):

@@ -15,8 +15,8 @@ def reachability(network, invariant, d):
   current_round = [init_point]
   next_round = []
   for i in range(d):
-    #print "Reachability round " + str(i) 
-    #print current_round#, "\n"
+    print "Reachability round " + str(i) 
+    print current_round#, "\n"
     
     for p in current_round:
       next_round = next_round + gamma(psi.sym_call(p))
@@ -25,6 +25,7 @@ def reachability(network, invariant, d):
       return True
     current_round = next_round
     next_round = []
+    asd
   return False
 
 def main():
@@ -37,11 +38,14 @@ def main():
   invariants = open(inv_fp, "r").read()
   invariants = yaml.load(invariants, Loader=yaml.FullLoader)
 
+  solutions = [False, True, False, False, True, True, True, False, True, False, False, False]
+
   # traffic to loopback should not be reachable in general
   c = 0
   for invariant in invariants:
+    if not c == 0: c = c + 1; continue
     #print invariant
-    if not reachability(network_config,invariant,5):
+    if reachability(network_config,invariant,5) == solutions[c]:
       print "Success: Invariant " + str(c) + "\n"
     else:
       print "Failure: Invariant " + str(c) + "\n"

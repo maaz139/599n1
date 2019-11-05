@@ -82,9 +82,10 @@ class TransferFunctions:
     rt = self.routingTable[switch]
     for h in inbound_acl_headers:
       forwarding_points = forwarding_points + rt.sym_forward(h)
-    #print "##", forwarding_points
+    print "##", forwarding_points
     outgoing = []
     for p in forwarding_points:
+      print p
       if self.outBoundAcls.has_key(p[1]) and self.outBoundAcls[p[1]] is not None:
         outbound_acl_headers = self.outBoundAcls[p[1]].sym_check(p[0])
         for h in outbound_acl_headers:
