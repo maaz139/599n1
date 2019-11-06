@@ -1,3 +1,4 @@
+DEBUG = False
 
 class Header:
   def __init__(self,srcIp,dstIp,srcPort,dstPort,prtcl):
@@ -10,10 +11,10 @@ class Header:
   def __eq__(self, other):
     if isinstance(other, Header):
         return self.srcIp == other.srcIp and \
-              self.dstIp == other.dstIp #and \
-            #  self.srcPort == other.srcPort and \
-            #  self.dstPort == other.dstPort and \
-            #  self.protocol == other.protocol
+              self.dstIp == other.dstIp and \
+              self.srcPort == other.srcPort and \
+              self.dstPort == other.dstPort and \
+              self.protocol == other.protocol
     else:
       return False
   
@@ -31,11 +32,11 @@ class Header:
     return not self.__eq__(other)
 
 def make_new_sym_header():
-  return Header(set(['x'*32]),set(['x'*32]),tuple([0,1000000]),tuple([0,1000000]),tuple([0,1000000]))
+  return Header(set(['x'*32]),set(['x'*32]),tuple([0,65535]),tuple([0,65535]),tuple([0,255]))
 
 # if srcIp or dstIp is empty set, no packet can reach this state
 def is_empty_sym_header(h):
-  return len(h.srcIp) == 0 or len(h.dstIp) == 0
+  return len(h.srcIp) == 0 or len(h.dstIp) == 0 or h.dstPort[0] > h.dstPort[1]
 
 class Rule:
   '''
@@ -60,7 +61,8 @@ class Rule:
   def sym_matches(self, h):
     matching_srcIp = wce_intersection(h.srcIp, set(["".join(self.srcIp)]))
     matching_dstIp = wce_intersection(h.dstIp, set(["".join(self.dstIp)]))
-    return Header(matching_srcIp, matching_dstIp, h.srcPort, h.dstPort, h.protocol)
+    matching_dstport = port_intersection(h.dstPort, self.dstPort)
+    return Header(matching_srcIp, matching_dstIp, h.srcPort, matching_dstport, h.protocol)
 
   def __str__(self):
     return "(" + str("".join(self.srcIp)) + ", " \
@@ -100,25 +102,33 @@ class Acl:
     res = []
     srcCompls = hs.srcIp
     dstCompls = hs.dstIp
+    dstpCompls = hs.dstPort
     for r in self.rules:
-      print ("ACL RULE: " + str(r))
+      if DEBUG:
+        print ("ACL RULE: " + str(r))
       hs.srcIp = srcCompls
       hs.dstIp = dstCompls
+      hs.dstPort = dstpCompls
       hprime = r.sym_matches(hs)
       if not is_empty_sym_header(hprime):
         if r.action == "Allow":
           res.append(hprime)
+        if r.action == "Deny":
+          return (True, res)
         # I believe the following two lines have an edge case bug but my head is firmly in the sand at this point
         srcCompls = wce_intersection(srcCompls,wce_complement(set(["".join(r.srcIp)])))
         dstCompls = wce_intersection(dstCompls,wce_complement(set(["".join(r.dstIp)])))
-      print ("UPDATED HEADER: " + str(res) + "\n")
-    if self.default == "Allow" and len(srcCompls) != 0 and len(dstCompls) != 0:
+        dstpCompls = port_complement_intersect(dstpCompls,hprime.dstPort)
+      if DEBUG:
+        print ("UPDATED HEADER: " + str(res) + "\n")
+    if self.default == "Allow" and len(srcCompls) != 0 and len(dstCompls) != 0 and dstpCompls[0] <= dstpCompls[1]:
       hs.srcIp = srcCompls
       hs.dstIp = dstCompls
+      hs.dstPort = dstpCompls
       res.append(hs)
       return (False, res)
     
-    if len(srcCompls) + len(dstCompls) > 0:
+    if len(srcCompls) + len(dstCompls) > 0 or dstpCompls[0] <= dstpCompls[1]:
       return (True, res)
     else:
       return (False, res)
@@ -208,15 +218,22 @@ class ForwardingTable:
       if rte.prefix_size < prev_prefix:
         h.dstIp = compls
         prev_prefix = rte.prefix_size
-      print ("Forwarding rule:" + str(rte))
+      if DEBUG:
+        print ("Forwarding rule:" + str(rte))
       hprime = rte.sym_matches(h)
-      print ("Matched packets: " + str(hprime.dstIp) + "\n")
+      if DEBUG:
+        print ("Matched packets: " + str(hprime.dstIp) + "\n")
       # if header can't reach this rule, we can ignore it
       if not is_empty_sym_header(hprime):
         res.append(tuple([hprime, rte.interface]))
         compls = wce_intersection(compls, wce_complement(set(["".join(rte.prefix)])))
-        print ("Updated Packet Set:\n" + str(res) + "\n")
-    return res
+        if DEBUG:
+          print ("Updated Packet Set:\n" + str(res) + "\n")
+    
+    if len(compls) > 0:
+      return (True, res)
+    else:
+      return (False, res)
 
   def __str__(self):
     res = ""
@@ -282,18 +299,26 @@ def bit_intersect(b1, b2):
 # Set operators for wildcard headers
 def wce_intersection(wce1, wce2):
   # A intersect empty set = empty set
-  #print(wce1)
-  #print(wce2)
   if len(wce1) == 0 or len(wce2) == 0:
     return set()
   res = set()
   for e1 in wce1:
     for e2 in wce2:
       new_wce = "".join([bit_intersect(z[0],z[1]) for z in zip(e1, e2)])
-      #print(new_wce)
       if 'z' not in new_wce:
         res.add(new_wce)
   return res
+
+def port_intersection(h, r):
+  return (max(h[0], r[0]), min(h[1], r[1]))
+
+def port_complement_intersect(h, r):
+  if h[0] < r[0]:
+    return (h[0], r[0])
+  elif h[1] > r[1]:
+    return (r[1], h[1])
+  else:
+    return (1,0)
 
 # some unions can be simplified, leave that for later
 def wce_union(wce1, wce2):

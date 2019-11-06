@@ -2,6 +2,8 @@ import sys
 import yaml
 from util import *
 
+DEBUG = False
+
 # Network transfer function is modelled as:
 #   1. Apply InACL of the port at which packet arrives
 #       - Apply rules in the order in which they are defined in config
@@ -25,13 +27,18 @@ class TopologyFunction:
   # take one header/switch tuple, return set of header/switch tuples
   def __call__(self, networkSpacePoints):
     res = []
+    packets_dropped = []
     for networkSpacePoint in networkSpacePoints:
       header = networkSpacePoint[0]
       switch = networkSpacePoint[1]
       if switch in self.topology:
+        if len(self.topology[switch]) == 0:
+          packets_dropped.append(switch)
         for p in self.topology[switch]:
           res.append(tuple([header,p]))
-    return (False, res)
+      else:
+        packets_dropped.append(switch)
+    return (packets_dropped, res)
 
 
 class TransferFunctions:
@@ -72,8 +79,9 @@ class TransferFunctions:
   def sym_call(self, networkSpacePoint):
     packets_dropped = False
 
-    print("=======================================================================================\n")
-    print ("#### APPLYING INGRESS ACLS ####\n")
+    if DEBUG:
+      print("=======================================================================================\n")
+      print ("#### APPLYING INGRESS ACLS ####\n")
     header = networkSpacePoint[0]
     switch = networkSpacePoint[1]
     if switch in self.inBoundAcls and self.inBoundAcls[switch] is not None:
@@ -85,23 +93,29 @@ class TransferFunctions:
     else:
       inbound_acl_headers = [header]
 
-    print("HEADER SPACE AFTER IN ACLS:\n" + str(inbound_acl_headers) + "\n")
-    print("=======================================================================================\n")
+    if DEBUG:
+      print("HEADER SPACE AFTER IN ACLS:\n" + str(inbound_acl_headers) + "\n")
+      print("=======================================================================================\n")
 
-    print ("#### FORWARDING PACKETS ####\n")
+    if DEBUG:
+      print ("#### FORWARDING PACKETS ####\n")
     forwarding_points = []
     rt = self.routingTable[switch]
     for h in inbound_acl_headers:
-      forwarding_points = forwarding_points + rt.sym_forward(h)
+      res = rt.sym_forward(h)
+      packets_dropped = packets_dropped or res[0]
+      forwarding_points = forwarding_points + res[1]
     
-    print ("HEADER SPACE AFTER FORWARDING:\n" + str(forwarding_points) + "\n")
+    if DEBUG:
+      print ("HEADER SPACE AFTER FORWARDING:\n" + str(forwarding_points) + "\n")
     
-    print("=======================================================================================\n")
-    print ("#### APPLYING OUTGRESS ACLS ####\n")
+      print("=======================================================================================\n")
+      print ("#### APPLYING OUTGRESS ACLS ####\n")
 
     outgoing = []
     for p in forwarding_points:
-      print ("HEADER: " + str(p) + "\n")
+      if DEBUG:
+        print ("HEADER: " + str(p) + "\n")
       if p[1] in self.outBoundAcls and self.outBoundAcls[p[1]] is not None:
         acl_output = self.outBoundAcls[p[1]].sym_check(p[0])
         packets_dropped = packets_dropped or acl_output[0]
@@ -110,10 +124,12 @@ class TransferFunctions:
           outgoing.append(tuple([h,p[1]]))
       else:
         outgoing.append(p)
-      print ("HEADER AFER ACL: " + str(outgoing) + "\n")
+      if DEBUG:
+        print ("HEADER AFER ACL: " + str(outgoing) + "\n")
 
-    print ("HEADER SPACE AFTER OUT ACLS:\n" + str(outgoing) + "\n")
-    print("=======================================================================================\n")
+    if DEBUG:
+      print ("HEADER SPACE AFTER OUT ACLS:\n" + str(outgoing) + "\n")
+      print("=======================================================================================\n")
 
     return (packets_dropped, outgoing)
 
@@ -130,9 +146,6 @@ class TransferFunctions:
       return acl(header)
     else:
       return "Allow"
-
-
-
 
 def main():
   network_fp = sys.argv[1]
