@@ -22,7 +22,7 @@ class Header:
                + str(self.dstIp) + ", " \
                + str(self.srcPort) + ", " \
                + str(self.dstPort) + ", " \
-               + str(self.protocol) + ", "
+               + str(self.protocol) + ")"
 
   def __repr__(self):
     return str(self)
@@ -63,8 +63,8 @@ class Rule:
     return Header(matching_srcIp, matching_dstIp, h.srcPort, h.dstPort, h.protocol)
 
   def __str__(self):
-    return "(" + str(self.srcIp) + ", " \
-               + str(self.dstIp) + ", " \
+    return "(" + str("".join(self.srcIp)) + ", " \
+               + str("".join(self.dstIp)) + ", " \
                + str(self.srcPort) + ", " \
                + str(self.dstPort) + ", " \
                + str(self.protocol) + ", " \
@@ -101,19 +101,27 @@ class Acl:
     srcCompls = hs.srcIp
     dstCompls = hs.dstIp
     for r in self.rules:
+      print ("ACL RULE: " + str(r))
       hs.srcIp = srcCompls
       hs.dstIp = dstCompls
       hprime = r.sym_matches(hs)
       if not is_empty_sym_header(hprime):
         if r.action == "Allow":
           res.append(hprime)
+        # I believe the following two lines have an edge case bug but my head is firmly in the sand at this point
         srcCompls = wce_intersection(srcCompls,wce_complement(set(["".join(r.srcIp)])))
         dstCompls = wce_intersection(dstCompls,wce_complement(set(["".join(r.dstIp)])))
+      print ("UPDATED HEADER: " + str(res) + "\n")
     if self.default == "Allow" and len(srcCompls) != 0 and len(dstCompls) != 0:
       hs.srcIp = srcCompls
       hs.dstIp = dstCompls
       res.append(hs)
-    return res
+      return (False, res)
+    
+    if len(srcCompls) + len(dstCompls) > 0:
+      return (True, res)
+    else:
+      return (False, res)
 
 
   def __str__(self):
@@ -193,16 +201,20 @@ class ForwardingTable:
     # if we match a rule, it means we failed to match all previous rules
     # so maintain an expression that is intersection of complements of previous rules
     compls = h.dstIp
+    prev_prefix = 32
     # relies on RTEs being sorted by prefix
     for rte in self.ft:
-      #h.dstIp = compls
+      # Packets that have already matched a rule with longer prefix should not match again
+      if rte.prefix_size < prev_prefix:
+        h.dstIp = compls
+        prev_prefix = rte.prefix_size
       print ("Forwarding rule:" + str(rte))
       hprime = rte.sym_matches(h)
       print ("Matched packets: " + str(hprime.dstIp) + "\n")
       # if header can't reach this rule, we can ignore it
       if not is_empty_sym_header(hprime):
         res.append(tuple([hprime, rte.interface]))
-        #compls = wce_intersection(compls, wce_complement(set(["".join(rte.prefix)])))
+        compls = wce_intersection(compls, wce_complement(set(["".join(rte.prefix)])))
         print ("Updated Packet Set:\n" + str(res) + "\n")
     return res
 
@@ -270,12 +282,15 @@ def bit_intersect(b1, b2):
 # Set operators for wildcard headers
 def wce_intersection(wce1, wce2):
   # A intersect empty set = empty set
+  #print(wce1)
+  #print(wce2)
   if len(wce1) == 0 or len(wce2) == 0:
     return set()
   res = set()
   for e1 in wce1:
     for e2 in wce2:
       new_wce = "".join([bit_intersect(z[0],z[1]) for z in zip(e1, e2)])
+      #print(new_wce)
       if 'z' not in new_wce:
         res.add(new_wce)
   return res

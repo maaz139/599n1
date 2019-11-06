@@ -31,7 +31,7 @@ class TopologyFunction:
       if switch in self.topology:
         for p in self.topology[switch]:
           res.append(tuple([header,p]))
-    return res
+    return (False, res)
 
 
 class TransferFunctions:
@@ -70,14 +70,18 @@ class TransferFunctions:
     return outgoing
 
   def sym_call(self, networkSpacePoint):
+    packets_dropped = False
+
     print("=======================================================================================\n")
     print ("#### APPLYING INGRESS ACLS ####\n")
     header = networkSpacePoint[0]
     switch = networkSpacePoint[1]
     if switch in self.inBoundAcls and self.inBoundAcls[switch] is not None:
-      inbound_acl_headers = self.inBoundAcls[switch].sym_check(header)
+      acl_output = self.inBoundAcls[switch].sym_check(header)
+      packets_dropped = packets_dropped or acl_output[0]
+      inbound_acl_headers = acl_output[1]
       if len(inbound_acl_headers) == 0:
-        return set()
+        return (packets_dropped, set())
     else:
       inbound_acl_headers = [header]
 
@@ -94,18 +98,24 @@ class TransferFunctions:
     
     print("=======================================================================================\n")
     print ("#### APPLYING OUTGRESS ACLS ####\n")
-    
+
     outgoing = []
     for p in forwarding_points:
-      print (p)
+      print ("HEADER: " + str(p) + "\n")
       if p[1] in self.outBoundAcls and self.outBoundAcls[p[1]] is not None:
-        outbound_acl_headers = self.outBoundAcls[p[1]].sym_check(p[0])
+        acl_output = self.outBoundAcls[p[1]].sym_check(p[0])
+        packets_dropped = packets_dropped or acl_output[0]
+        outbound_acl_headers = acl_output[1]
         for h in outbound_acl_headers:
           outgoing.append(tuple([h,p[1]]))
       else:
         outgoing.append(p)
-    #print "##", outgoing
-    return outgoing
+      print ("HEADER AFER ACL: " + str(outgoing) + "\n")
+
+    print ("HEADER SPACE AFTER OUT ACLS:\n" + str(outgoing) + "\n")
+    print("=======================================================================================\n")
+
+    return (packets_dropped, outgoing)
 
   def check_inbound_acl(self, header, switch):
     acl = self.inBoundAcls[switch]
