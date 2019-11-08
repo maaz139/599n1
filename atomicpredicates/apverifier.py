@@ -2,10 +2,20 @@
 # apverifier paper only considers IP networks
 
 from pyeda.inter import *
+from util import *
+
+# basically, there's one set of variables that represent all packets
+srcIpVars = bddvars('srcIp',32)
+dstIpVars = bddvars('dstIp',32)
+
+# all predicates are boolean formulas over those variables
 
 # returns bdd that represents whether an entry in ACL table matches a (generic) header
 def ACL_line_to_bdd(acl):
-  pass
+  srcIpBdd = ipaddress2bdd(acl.SrcIp, srcIpVars)
+  dstIpBdd = ipaddress2bdd(acl.DstIp, dstIpVars)
+  # protocol and port
+  return srcIpBdd & dstIpBdd
 
 # Yang & Lam 2013 algorithm 1
 # shouldn't there be a cleanup line for the default action?
