@@ -3,6 +3,29 @@ import sys
 #from hsa import TopologyFunction, TransferFunctions
 #from util import make_new_sym_header, ip_to_wce_set, port_to_tuple
 
+class Fact:
+	name = "Undefined"
+	args = []
+
+	def __str__(self):
+		return self.name + "(" + ", ".join(self.args) + ")"
+
+	def __repr__(self):
+		return str(self)
+
+class Neighbour(Fact):
+	def __init__(self, src, dst):
+		self.name = "Neighbour"
+		self.args = [src, dst]
+
+def getNeighbours(network_config):
+	facts = []
+	for device in network_config["Devices"]:
+		for interface in device["Interfaces"]:
+			if not interface["Neighbor"] is None:
+				facts.append(Neighbour(interface["Name"], interface["Neighbor"]))
+	return facts
+
 def match(rr, case):
 	return False
 
@@ -13,10 +36,12 @@ def main():
 
 	# Load network config fule
 	network_fp = sys.argv[1]
-	network_config = open(network_fp, "r").read();
+	network_config = open(network_fp, "r").read()
 	network_config = yaml.load(network_config, Loader=yaml.FullLoader)
 	
 	# Get routing rules from batfish
+	network_facts = getNeighbours(network_config)
+	print network_facts
 	rr = None # TODO
 
 	# Load invariants file
