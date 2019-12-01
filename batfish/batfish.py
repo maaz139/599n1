@@ -3,6 +3,8 @@ import sys
 #from hsa import TopologyFunction, TransferFunctions
 #from util import make_new_sym_header, ip_to_wce_set, port_to_tuple
 
+###############################################################################
+
 class Fact:
 	name = "Undefined"
 	args = []
@@ -18,12 +20,28 @@ class Neighbour(Fact):
 		self.name = "Neighbour"
 		self.args = [src, dst]
 
+class Announcement(Fact):
+	def __init__(self, src, route):
+		self.name = "AdvertisedRoute"
+		self.args = [src, route]
+
+###############################################################################
+
 def getNeighbours(network_config):
 	facts = []
 	for device in network_config["Devices"]:
 		for interface in device["Interfaces"]:
 			if not interface["Neighbor"] is None:
 				facts.append(Neighbour(interface["Name"], interface["Neighbor"]))
+	return facts
+
+def getAnnouncements(network_config):
+	facts = []
+	for device in network_config["Devices"]:
+		for interface in device["Interfaces"]:
+			for route in device["BgpConfig"][0]["AdvertisedRoutes"]:
+				facts.append(Announcement(interface["Name"], route))
+		print facts
 	return facts
 
 def match(rr, case):
@@ -41,7 +59,8 @@ def main():
 	
 	# Get routing rules from batfish
 	network_facts = getNeighbours(network_config)
-	print network_facts
+	network_facts += getAnnouncements(network_config)
+	#print network_facts
 	rr = None # TODO
 
 	# Load invariants file
