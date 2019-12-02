@@ -132,7 +132,17 @@ Devices:
         OutBgpPolicy: r4_default_bgp_import   
     BgpConfig:
       - AdvertisedRoutes: [70.4.193.0/24, 10.0.0.1/32]
-      - InboundPolicies: []
+      - InboundPolicies: 
+        - Name: "r4_default_bgp_import"
+          PolicyClauses:
+            - Matches: ["prefix: 70.4.193.0/[24-24]"]
+              Actions: ["allow"]
+            - Matches: ["prefix: 10.0.0.1/[32-32]"]
+              Actions: ["allow"]
+            - Matches: ["tag: 1"]
+              Actions: ["remove tag 1", "allow"]
+            - Matches: []
+              Actions: ["drop"]
       - OutboundPolicies:
         # r4 allows its own routes out and allows routes with tag 1 attached
         - Name: "r4_default_bgp_import"
