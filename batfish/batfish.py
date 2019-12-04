@@ -25,8 +25,9 @@ class Rule:
 	def __repr__(self):
 		return str(self)
 
-class Route:
+class Route(pyDatalog.Mixin):
 	def __init__(self, pre, pv, nh, t):
+		super(Route, self).__init__()
 		self.prefix = pre
 		self.path_vec = pv
 		self.next_hop = nh
@@ -34,8 +35,8 @@ class Route:
 
 	def __str__(self):
 		return "(" + str(self.prefix) + ", " \
-		           + str(self.path_vec) + "," \
-		           + str(self.next_hop) + "," \
+		           + str(self.path_vec) + ", " \
+		           + str(self.next_hop) + ", " \
 		           + str(self.tags) + ")"
 
 	def __repr__(self):
@@ -195,7 +196,7 @@ def getNeighbours(network_config):
 	for device in network_config["Devices"]:
 		for interface in device["Interfaces"]:
 			if not interface["Neighbor"] is None:
-				facts.append(Neighbour(interface["Name"].replace('@',''), interface["Name"].replace('@','')))
+				facts.append(Neighbour(interface["Name"].replace('@',''), interface["Neighbor"].replace('@','')))
 	return facts
 
 def getAnnouncements(network_config):
@@ -205,12 +206,12 @@ def getAnnouncements(network_config):
 			for prefix in device["BgpConfig"][0]["AdvertisedRoutes"]:
 				facts.append(
 					Announcement(
-						interface["Name"].replace('@',''), 	# Announcer
+						device["Name"],											 	# Announcer
 						Route(
-							prefix, 						# Prefix announced
-							[device["Name"]], 	# Path vector
+							prefix, 														# Prefix announced
+							[device["Name"]], 									# Path vector
 							interface["Name"].replace('@',''),	# Next hop
-							{}									# Tags
+							{}																	# Tags
 						)
 					)
 				)
@@ -309,6 +310,10 @@ def batfish(terms, interfaces, neighbours,
 def match(rr, case):
 	return False
 
+def foo(v):
+	print v.v()
+	return v
+
 if __name__== "__main__" :
 	###############################################################################
 	## Parsing and initialization
@@ -334,16 +339,48 @@ if __name__== "__main__" :
 	## For some reason pyDatalog doesn't work inside functions, hence inlined
 
 	# Terms to represent facts, such as neighbours
-	pyDatalog.create_terms(",".join(terms["facts"]))
-
-	# Terms to represent all devices and interfaces in a network
-	pyDatalog.create_terms(",".join(terms["devices"]))
-	pyDatalog.create_terms(",".join(terms["interfaces"]))
+	pyDatalog.create_terms("neighbour, advertisedRoute, deviceHasInterface, ribCandidate")
 
 	# Neighbours relation between interfaces
+	for n in neighbours:
+		+(neighbour(n.args[0], n.args[1]))
 	
+	# Associate devices with their interfaces
+	for i in interfaces:
+		+(deviceHasInterface(i.args[0], i.args[1]))
 
+	for a in announcements:
+		# Reasoning about objects is for whatever reason
+		# super slow, so I unroll the route class
+		#+(advertisedRoute(a.args[0], a.args[1]))
+		r = a.args[1]
+		+(advertisedRoute(
+			a.args[0], 
+			r.prefix,
+			r.path_vec,
+			r.next_hop,
+			list(r.tags)
+		))
+	
+	# Rules to model route announcements
+	pyDatalog.create_terms("Device1,Device2,Interface1,Interface2,Prefix,PathVector,NextHop,Tags")
 
+	# This rule infers a candidate route 'R' available to
+	# 'D1' for packets with ip prefix 'P'.
+	#
+	# Condition 1: Both devices must be connected
+	# Condition 2: D2 advertises a route for prefix
+
+	# Reasoning about objects is for whatever reason
+	# super slow, so I unroll the route class
+	#ribCandidate(Device1,Prefix,Route) <= deviceHasInterface(Device1,Interface1) & deviceHasInterface(Device2,Interface2) & neighbour(Interface1,Interface2) & advertisedRoute(Device2,Route) & Route.prefix[Route] == Prefix
+
+	ribCandidate(Device1,Prefix,PathVector,NextHop,Tags) <= deviceHasInterface(Device1,Interface1) & deviceHasInterface(Device2,Interface2) & neighbour(Interface1,Interface2) & advertisedRoute(Device2,Prefix,PathVector,NextHop,Tags) #& 
+		#allow_outbound_policy(Interface1,Route) & 
+		#allow_inbound_policy(Interface1,Route)
+
+	print ribCandidate(Device1,Prefix,PathVector,NextHop,Tags)
+#	print ribCandidate('r1',Y)
 	exit()
 
 	rr = simulate_BGP()
