@@ -1,11 +1,12 @@
 import yaml
 import sys
+from pyDatalog import pyDatalog
 
 ###############################################################################
 ## Base Classes
 
 class Fact:
-	name = "Undefined"
+	name = "undefined"
 	args = []
 
 	def __str__(self):
@@ -49,13 +50,18 @@ class Action:
 
 class Neighbour(Fact):
 	def __init__(self, src, dst):
-		self.name = "Neighbour"
+		self.name = "neighbour"
 		self.args = [src, dst]
 
 class Announcement(Fact):
 	def __init__(self, src, route):
-		self.name = "AdvertisedRoute"
+		self.name = "advertisedRoute"
 		self.args = [src, route]
+
+class Interface(Fact):
+	def __init__(self, device, interface):
+		self.name = "deviceHasInterface"
+		self.args = [device, interface]
 
 ###############################################################################
 ## Match expressions for policy clauses
@@ -88,7 +94,7 @@ class TagMatcher(Matcher):
 		self.tag_value = val
 
 	def matches(self, route):
-		return self.tags.contains(self.tag_value)
+		return route.tags.contains(self.tag_value)
 
 	def __str__(self):
 		return "tag: " + self.tag_value
@@ -101,7 +107,7 @@ class AddTag(Action):
 		self.tag = t
 
 	def apply(route):
-		route.tags.append(self.tag)
+		route.tags.add(self.tag)
 		return route
 
 	def __str__(self):
@@ -162,12 +168,34 @@ class Policy():
 
 ###############################################################################
 
+def getTerms(network_config):
+	# Fact names
+	static_terms = {"neighbour", "advertisedRoute", "deviceHasInterface"}
+
+	devices = set([])
+	interfaces = set([])
+
+	# Devices & Intefaces
+	for device in network_config["Devices"]:
+		devices.add(device["Name"])
+		for interface in device["Interfaces"]:
+			interfaces.add(interface["Name"].replace('@',''))
+	
+	return {"facts": static_terms, "devices": devices, "interfaces": interfaces}
+
+def getInterfaces(network_config):
+	facts = []
+	for device in network_config["Devices"]:
+		for interface in device["Interfaces"]:
+			facts.append(Interface(device["Name"], interface["Name"].replace('@','')))
+	return facts
+
 def getNeighbours(network_config):
 	facts = []
 	for device in network_config["Devices"]:
 		for interface in device["Interfaces"]:
 			if not interface["Neighbor"] is None:
-				facts.append(Neighbour(interface["Name"], interface["Neighbor"]))
+				facts.append(Neighbour(interface["Name"].replace('@',''), interface["Name"].replace('@','')))
 	return facts
 
 def getAnnouncements(network_config):
@@ -177,11 +205,11 @@ def getAnnouncements(network_config):
 			for prefix in device["BgpConfig"][0]["AdvertisedRoutes"]:
 				facts.append(
 					Announcement(
-						interface["Name"], 	# Announcer
+						interface["Name"].replace('@',''), 	# Announcer
 						Route(
 							prefix, 						# Prefix announced
 							[device["Name"]], 	# Path vector
-							interface["Name"],	# Next hop
+							interface["Name"].replace('@',''),	# Next hop
 							{}									# Tags
 						)
 					)
@@ -246,7 +274,7 @@ def getInboundPolicies(network_config):
 	for device in network_config["Devices"]:
 		for interface in device["Interfaces"]:
 			if not interface["InBgpPolicy"] is None:
-				policy_map[interface["Name"]] = policies[interface["InBgpPolicy"]]
+				policy_map[interface["Name"].replace('@','')] = policies[interface["InBgpPolicy"]]
 
 	return policy_map
 
@@ -262,16 +290,29 @@ def getOutboundPolicies(network_config):
 	for device in network_config["Devices"]:
 		for interface in device["Interfaces"]:
 			if not interface["OutBgpPolicy"] is None:
-				policy_map[interface["Name"]] = policies[interface["OutBgpPolicy"]]
+				policy_map[interface["Name"].replace('@','')] = policies[interface["OutBgpPolicy"]]
 
 	return policy_map
+
+###############################################################################
+
+def batfish(terms, interfaces, neighbours, 
+							announcements, inbound_policies,	outbound_policies):
+	
+	
+	return 1
+	#print(parent(bill,X)) # prints [('John Adams',)]
+
 
 ###############################################################################
 
 def match(rr, case):
 	return False
 
-def main():
+if __name__== "__main__" :
+	###############################################################################
+	## Parsing and initialization
+
 	if len(sys.argv) != 3:
 		print "Incorrect args: python batfish.py <network-file> <invariants-file>"
 		exit()
@@ -282,11 +323,31 @@ def main():
 	network_config = yaml.load(network_config, Loader=yaml.FullLoader)
 	
 	# Get routing rules from batfish
+	terms = getTerms(network_config)
+	interfaces = getInterfaces(network_config)
 	neighbours = getNeighbours(network_config)
 	announcements = getAnnouncements(network_config)
 	inbound_policies = getInboundPolicies(network_config)
 	outbound_policies = getOutboundPolicies(network_config)
+
+	###############################################################################
+	## For some reason pyDatalog doesn't work inside functions, hence inlined
+
+	# Terms to represent facts, such as neighbours
+	pyDatalog.create_terms(",".join(terms["facts"]))
+
+	# Terms to represent all devices and interfaces in a network
+	pyDatalog.create_terms(",".join(terms["devices"]))
+	pyDatalog.create_terms(",".join(terms["interfaces"]))
+
+	# Neighbours relation between interfaces
 	
+
+
+	exit()
+
+	rr = simulate_BGP()
+
 	#print network_facts
 	rr = None # TODO
 
@@ -307,6 +368,3 @@ def main():
 		case_id += 1
 
 	print "Invariant incorrect: Routing rules don't match"
-
-if __name__== "__main__" :
-	main()
