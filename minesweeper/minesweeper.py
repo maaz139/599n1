@@ -48,39 +48,121 @@ def getPacketDecl():
 	prefix = "Pkt_"
 	fields = ["DstIp", "SrcIp", "DstPort", "SrcPort", "Protocol"]
 
-	code = ""
+	code = ";; Encoding Packet Constraints\n"
 	for field in fields:
 		code += "(declare-const " + prefix + field + " Int)\n"
+	return code
 
-	#print code
+def getNeighbours(network):
+	neighbour = {}
+	for device in network["Devices"]:
+		for interface in device["Interfaces"]:
+			neighbour[interface["Name"]] = interface["Neighbor"]
+	return neighbour
+
+def getDevices(network):
+	devices = {}
+	for device in network["Devices"]:
+		devices[device["Name"]] = []
+		for interface in device["Interfaces"]:
+			devices[device["Name"]].append(interface["Name"])
+	return devices
+
+def getTopologyDecl(neighbour):
+	code = ""
+	for i_src in neighbour.keys():
+		for i_dst in neighbour.keys():
+			if i_src != i_dst:
+				code += "(declare-const datafwd_" + i_src + "_" + i_dst + " Bool)\n"
+	code += "\n"
+	for i_src in neighbour.keys():
+		for i_dst in neighbour.keys():
+			if i_src != i_dst:
+				if neighbour[i_src] != i_dst:
+					code += "(assert (= datafwd_" + i_src + "_" + i_dst + " False))\n"
+	code += "\n"
+	for i_src in neighbour.keys():
+		for i_dst in neighbour.keys():
+			if i_src != i_dst:
+				if neighbour[i_src] == i_dst:
+					code += "(assert (= datafwd_" + i_src + "_" + i_dst + " True))\n"
 	return code
 
 def getPacketConstraints(dstPrefixes, srcPrefixes, protocols, dstPorts, srcPorts):
 	code = ""
-	
+
 	# DstIp Constraints
 	code += printList(dstPrefixes, "(assert (or ", "))", " ", lambda a: "(and (>= Pkt_DstIp " + a[0] + ") (< Pkt_DstIp " + a[1] + ")")
-
 	code += "\n"
-
 	# SrcIp Constraints
 	code += printList(srcPrefixes, "(assert (or ", "))", " ", lambda a: "(and (>= Pkt_SrcIp " + a[0] + ") (< Pkt_SrcIp " + a[1] + ")")
-
 	code += "\n"
-	
 	# Protocol Constraints
 	code += printList(protocols, "(assert (or ", "))", " ", lambda a: "(and (>= Pkt_Protocol " + a[0] + ") (< Pkt_Protocol " + a[1] + ")")
-
-	code += "\n"
-	
+	code += "\n"	
 	# DstPort Constraints
 	code += printList(dstPorts, "(assert (or ", "))", " ", lambda a: "(and (>= Pkt_DstPort " + a[0] + ") (< Pkt_DstPort " + a[1] + ")")
-
 	code += "\n"
-	
 	# DstPort Constraints
 	code += printList(srcPorts, "(assert (or ", "))", " ", lambda a: "(and (>= Pkt_SrcPort " + a[0] + ") (< Pkt_SrcPort " + a[1] + ")")
 
+	return code
+
+def getReachabilityQuery(ingres, egress):
+	code = ";; Reachability Queries\n"
+
+	for i in ingres:
+		for e in egress:
+			code += "(assert (not canReach_" + i + "_" + e + "))\n"
+
+	return code
+
+def getReachabilityConstraints(ingres, egress, devices, neighbours):
+	code = "\n;; Encoding Reachability Constraints\n";
+
+	# Declare reachability variable for each interface that is not dst
+	for dst in egress:
+		for device in devices.keys():
+			for interface in devices[device]:
+				if interface != dst:
+					code += "(declare-const canReach_" + interface + "_" + dst + " Bool)\n"
+	code += "\n"
+	
+	# Find connected interfaces
+	connected_interface = {}
+	for dst in egress:
+		for device in devices.keys():
+			# Is device connected to dst?
+			connected = None
+			for interface in devices[device]:
+				if interface == dst or neighbours[interface] == dst:
+					connected = interface
+
+			connected_interface[(device, dst)] = connected
+
+	# Interfaces can reach dst if they route to an interface that can reach dst			
+	for dst in egress:
+		for device in devices.keys():
+			if connected_interface[(device, dst)] is None:
+				continue
+			for interface in devices[device]:
+				if interface != connected_interface:
+					code += "(assert (= canReach_" + interface + "_" + dst + " datafwd_" + interface + "_" + connected_interface[(device, dst)] + "))\n"
+
+	code += "\n"
+
+	for dst in egress:
+		for device in devices.keys():
+			if not connected_interface[(device, dst)] is None:
+				continue;
+			for interface1 in devices[device]:
+				code += "(= canReach_" + interface1 + "_" + dst + " (or"
+				for interface2 in devices[device]:
+					if neighbours[interface2] is None:
+						continue
+					code += " (and datafwd_" + interface1 + "_" + interface2 + " canReach_" + neighbours[interface2] + "_" + dst + ")"
+				code += "))\n"
+		
 	return code
 
 ###############################################################################
@@ -88,8 +170,7 @@ def getPacketConstraints(dstPrefixes, srcPrefixes, protocols, dstPorts, srcPorts
 
 def main():
 	if len(sys.argv) != 3:
-		print "Incorrect args: python batfish.py <network-file> <invariants-file>"
-		exit()
+		raise Exception("Incorrect args: python batfish.py <network-file> <invariants-file>")
 
 	# Load network config fule
 	network_fp = sys.argv[1]
@@ -101,9 +182,15 @@ def main():
 	invariants = open(inv_fp, "r").read()
 	invariants = yaml.load(invariants, Loader=yaml.FullLoader)
 
+	# Parse network
+	devices = getDevices(network_config)
+	neighbours = getNeighbours(network_config)
+
 	packetDecl = getPacketDecl()
+	topologyDecl = getTopologyDecl(neighbours)
 
 	for invariant in invariants['Reachability']:
+		# Get packet constraints
 		packetConstraints = getPacketConstraints(
 			[parsePrefix(r) for r in invariant["DstIp"]],
 			[parsePrefix(r) for r in invariant["SrcIp"]],
@@ -112,7 +199,27 @@ def main():
 			[parseRange(r) for r in invariant["SrcPort"]]
 		)
 
-		print packetDecl + "\n" + packetConstraints
+		# Encode reachability constraints and query
+		reachability_constraints = getReachabilityConstraints(
+			invariant["Ingress"], 
+			invariant["Egress"],
+			devices,
+			neighbours
+		)
+
+		# Encode reachability query
+		query = getReachabilityQuery(
+			invariant["Ingress"], 
+			invariant["Egress"]
+		)
+
+		# Encode data-plane constraints
+		dataplane_constraints = getDataplaneConstraints
+		
+		print packetDecl + "\n" + \
+			packetConstraints + "\n" + \
+			reachability_constraints + "\n" + \
+			query
 		
 		exit()
 
