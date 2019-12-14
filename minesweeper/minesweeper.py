@@ -102,6 +102,15 @@ def getOutAcls(network):
 			
 	return acl_map
 
+def getStaticRoutes(network):
+	static_routes = {}
+
+	for device in network["Devices"]:
+		for interface in device["Interfaces"]:
+			static_routes[interface["Name"]] = device["StaticRoutes"]
+	
+	return static_routes
+
 # def getTopologyDecl(neighbour):
 # 	code = ""
 # 	for i_src in neighbour.keys():
@@ -193,7 +202,7 @@ def getReachabilityConstraints(ingres, egress, devices, neighbours, fwd_edges):
 			for interface1 in devices[device]:
 				code += "(= canReach_" + interface1 + "_" + dst + " (or"
 				for interface2 in devices[device]:
-					if neighbours[interface2] is None:
+					if interface1 == interface2 or neighbours[interface2] is None:
 						continue
 					code += " (and datafwd_" + interface1 + "_" + interface2 + " canReach_" + neighbours[interface2] + "_" + dst + ")"
 					fwd_edges.append((interface1, interface2))
@@ -236,8 +245,6 @@ def getDataplaneConstraints(fwd_edges, neighbours, in_acls, out_acls):
 	code = "\n;; Encoding Dataplane Constraints\n";
 
 	for edge in fwd_edges:
-		in_acl = in_acls[edge[0]]
-		out_acl = out_acls[edge[1]]
 		code += "(declare-const datafwd_" + edge[0] + "_" + edge[1] + " Bool)\n"
 	code += "\n"
 
@@ -259,6 +266,66 @@ def getDataplaneConstraints(fwd_edges, neighbours, in_acls, out_acls):
 			outAclEncoding = encodeRules(out_acl["Rules"], out_acl["DefaultAction"])
 
 		code += "(assert (= datafwd" + postfix + " (and ctrlfwd" + postfix + " " + inAclEncoding + " " + outAclEncoding + ")))\n"
+
+	return code
+
+def encodeRoutes(static_routes, edge):
+	if len(static_routes) == 0:
+		return "bestbgp_" + edge[0] + "_" + edge[1]
+
+	route = static_routes[0]
+
+	if route["Interface"] != edge[1]:
+		return encodeRoutes(static_routes[1:], edge)
+	
+	prefix = parsePrefix(route["Prefix"])
+
+	code = "(ite (InRange Pkt_DstIP " + prefix[0] + " " + prefix[1] + ") True " + encodeRoutes(static_routes[1:], edge) + ")"
+
+	return code
+
+def getRouteSelection(fwd_edges, devices, neighbours, static_routes):
+	code = "\n;; Encoding Route Selection\n"
+
+	for edge in fwd_edges:
+		code += "(declare-const bestbgp_" + edge[0] + "_" + edge[1] + " Bool)\n"
+	code += "\n"
+
+	for edge in fwd_edges:
+		for device in devices:
+			if edge[0] in devices[device]:
+				interfaces = devices[device]
+
+		condition = "(and msg_in_" + edge[1] + "_valid "
+		for interface in interfaces:
+			if interface == edge[0] or interface == edge[1]:
+				continue
+			condition += "(<= msg_in_" + edge[1] + "_length msg_in_" + interface + "_length"
+		
+		code += "(assert (= bestbgp_" + edge[0] + "_" + edge[1] + " " + condition + "))\n"
+	code += "\n"	
+
+	# for edge in fwd_edges:
+	# 	code += "(declare-const best_" + edge[0] + "_" + edge[1] + " Bool)\n"
+	# code += "\n"
+
+	# for edge in fwd_edges:
+	# 	code += "(assert (= best_" + edge[0] + "_" + edge[1] + " " + encodeRoutes(static_routes[edge[0]], edge) + "))\n"
+	# code += "\n"
+	
+	for edge in fwd_edges:
+		code += "(declare-const ctrlfwd_" + edge[0] + "_" + edge[1] + " Bool)\n"
+	code += "\n"
+
+	for edge in fwd_edges:
+		code += "(assert (= ctrlfwd_" + edge[0] + "_" + edge[1] + " " + encodeRoutes(static_routes[edge[0]], edge) + "))\n"
+
+	print code
+	exit()
+
+	# TODO: Encode route announcements
+	# TODO: Declare advertised routes
+	# RUN!
 
 	return code
 
@@ -284,6 +351,7 @@ def main():
 	neighbours = getNeighbours(network_config)
 	in_acls = getInAcls(network_config)
 	out_acls = getOutAcls(network_config)
+	static_routes = getStaticRoutes(network_config)
 
 	# Generate z3 code
 	packetDecl = getPacketDecl()
@@ -322,9 +390,18 @@ def main():
 			in_acls,
 			out_acls
 		)
+
+		# Encode route selection
+		route_selection = getRouteSelection(
+			active_routing_edges,
+			devices,
+			neighbours,
+			static_routes
+		)
 		
 		print packetDecl + "\n" + \
 			packetConstraints + "\n" + \
+			route_selection + "\n" + \
 			dataplane_constraints + "\n" + \
 			reachability_constraints + "\n" + \
 			query
