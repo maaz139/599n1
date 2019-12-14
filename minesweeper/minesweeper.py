@@ -135,19 +135,19 @@ def getPacketConstraints(dstPrefixes, srcPrefixes, protocols, dstPorts, srcPorts
 	code = ""
 
 	# DstIp Constraints
-	code += printList(dstPrefixes, "(assert (or ", "))", " ", lambda a: "(and (>= Pkt_DstIp " + a[0] + ") (< Pkt_DstIp " + a[1] + ")")
+	code += printList(dstPrefixes, "(assert (or ", "))", " ", lambda a: "(and (>= Pkt_DstIp " + a[0] + ") (< Pkt_DstIp " + a[1] + "))")
 	code += "\n"
 	# SrcIp Constraints
-	code += printList(srcPrefixes, "(assert (or ", "))", " ", lambda a: "(and (>= Pkt_SrcIp " + a[0] + ") (< Pkt_SrcIp " + a[1] + ")")
+	code += printList(srcPrefixes, "(assert (or ", "))", " ", lambda a: "(and (>= Pkt_SrcIp " + a[0] + ") (< Pkt_SrcIp " + a[1] + "))")
 	code += "\n"
 	# Protocol Constraints
-	code += printList(protocols, "(assert (or ", "))", " ", lambda a: "(and (>= Pkt_Protocol " + a[0] + ") (< Pkt_Protocol " + a[1] + ")")
+	code += printList(protocols, "(assert (or ", "))", " ", lambda a: "(and (>= Pkt_Protocol " + a[0] + ") (< Pkt_Protocol " + a[1] + "))")
 	code += "\n"	
 	# DstPort Constraints
-	code += printList(dstPorts, "(assert (or ", "))", " ", lambda a: "(and (>= Pkt_DstPort " + a[0] + ") (< Pkt_DstPort " + a[1] + ")")
+	code += printList(dstPorts, "(assert (or ", "))", " ", lambda a: "(and (>= Pkt_DstPort " + a[0] + ") (< Pkt_DstPort " + a[1] + "))")
 	code += "\n"
 	# DstPort Constraints
-	code += printList(srcPorts, "(assert (or ", "))", " ", lambda a: "(and (>= Pkt_SrcPort " + a[0] + ") (< Pkt_SrcPort " + a[1] + ")")
+	code += printList(srcPorts, "(assert (or ", "))", " ", lambda a: "(and (>= Pkt_SrcPort " + a[0] + ") (< Pkt_SrcPort " + a[1] + "))")
 
 	return code
 
@@ -157,6 +157,8 @@ def getReachabilityQuery(ingres, egress):
 	for i in ingres:
 		for e in egress:
 			code += "(assert (not canReach_" + i + "_" + e + "))\n"
+
+	code += "\n(check-sat)\n(get-model)"
 
 	return code
 
@@ -189,7 +191,7 @@ def getReachabilityConstraints(ingres, egress, devices, neighbours, fwd_edges):
 			if connected_interface[(device, dst)] is None:
 				continue
 			for interface in devices[device]:
-				if interface != connected_interface:
+				if interface != connected_interface and interface != dst:
 					code += "(assert (= canReach_" + interface + "_" + dst + " datafwd_" + interface + "_" + connected_interface[(device, dst)] + "))\n"
 					fwd_edges.append((interface, connected_interface[(device, dst)]))
 
@@ -200,29 +202,29 @@ def getReachabilityConstraints(ingres, egress, devices, neighbours, fwd_edges):
 			if not connected_interface[(device, dst)] is None:
 				continue;
 			for interface1 in devices[device]:
-				code += "(= canReach_" + interface1 + "_" + dst + " (or"
+				code += "(assert (= canReach_" + interface1 + "_" + dst + " (or"
 				for interface2 in devices[device]:
 					if interface1 == interface2 or neighbours[interface2] is None:
 						continue
 					code += " (and datafwd_" + interface1 + "_" + interface2 + " canReach_" + neighbours[interface2] + "_" + dst + ")"
 					fwd_edges.append((interface1, interface2))
-				code += "))\n"
+				code += ")))\n"
 		
 	return code
 
 def encodeRules(rules, default):
 	if len(rules) == 0:
 		if default == "Allow":
-			return "True"
+			return "true"
 		else:
-			return "False"
+			return "false"
 
 	rule = rules[0]
 
 	code = "(ite (and "
 
 	prefix = parsePrefix(rule["DstIp"])
-	code += "(InRange Pkt_DstIP " + prefix[0] + " " + prefix[1] + ") "
+	code += "(InRange Pkt_DstIp " + prefix[0] + " " + prefix[1] + ") "
 
 	prefix = parsePrefix(rule["SrcIp"])
 	code += "(InRange Pkt_SrcIp " + prefix[0] + " " + prefix[1] + ") "
@@ -236,7 +238,7 @@ def encodeRules(rules, default):
 	r = parseRange(rule["SrcPort"])
 	code += "(InRange Pkt_SrcPort " + r[0] + " " + r[1] + ")) "
 
-	code += "True " if rule["Action"] == "Allow" else "False "
+	code += "true " if rule["Action"] == "Allow" else "false "
 	code += encodeRules(rules[1:], default) + ")"
 
 	return code
@@ -255,13 +257,13 @@ def getDataplaneConstraints(fwd_edges, neighbours, in_acls, out_acls):
 
 		inAclEncoding = ""
 		if in_acl is None:
-			inAclEncoding = "True"
+			inAclEncoding = "true"
 		else:
 			inAclEncoding = encodeRules(in_acl["Rules"], in_acl["DefaultAction"])
 
 		outAclEncoding = ""
 		if out_acl is None:
-			outAclEncoding = "True"
+			outAclEncoding = "true"
 		else:
 			outAclEncoding = encodeRules(out_acl["Rules"], out_acl["DefaultAction"])
 
@@ -280,11 +282,11 @@ def encodeRoutes(static_routes, edge):
 	
 	prefix = parsePrefix(route["Prefix"])
 
-	code = "(ite (InRange Pkt_DstIP " + prefix[0] + " " + prefix[1] + ") True " + encodeRoutes(static_routes[1:], edge) + ")"
+	code = "(ite (InRange Pkt_DstIp " + prefix[0] + " " + prefix[1] + ") true " + encodeRoutes(static_routes[1:], edge) + ")"
 
 	return code
 
-def getRouteSelection(fwd_edges, devices, neighbours, static_routes):
+def getRouteSelection(fwd_edges, devices, neighbours, static_routes, relevant_msgs):
 	code = "\n;; Encoding Route Selection\n"
 
 	for edge in fwd_edges:
@@ -296,11 +298,15 @@ def getRouteSelection(fwd_edges, devices, neighbours, static_routes):
 			if edge[0] in devices[device]:
 				interfaces = devices[device]
 
-		condition = "(and msg_in_" + edge[1] + "_valid "
+		relevant_msgs.append(edge[1])
+		condition = "(and msg_in_" + edge[1] + "_valid"
 		for interface in interfaces:
 			if interface == edge[0] or interface == edge[1]:
 				continue
-			condition += "(<= msg_in_" + edge[1] + "_length msg_in_" + interface + "_length"
+			relevant_msgs.append(interface)
+			condition += " (InRange Pkt_DstIp msg_in_" + edge[1] + "_ip_min msg_in_" + edge[1] + "_ip_max)"
+			condition += " (<= msg_in_" + edge[1] + "_length msg_in_" + interface + "_length)"
+		condition += ")"
 		
 		code += "(assert (= bestbgp_" + edge[0] + "_" + edge[1] + " " + condition + "))\n"
 	code += "\n"	
@@ -320,13 +326,30 @@ def getRouteSelection(fwd_edges, devices, neighbours, static_routes):
 	for edge in fwd_edges:
 		code += "(assert (= ctrlfwd_" + edge[0] + "_" + edge[1] + " " + encodeRoutes(static_routes[edge[0]], edge) + "))\n"
 
-	print code
-	exit()
+	return code
 
+def getRouteAnnouncements(active_routing_edges, relevant_msgs):
 	# TODO: Encode route announcements
 	# TODO: Declare advertised routes
 	# RUN!
+	code = "\n;; Encoding Route Announcements\n"
 
+	skip = []
+
+	for src in relevant_msgs:
+		if src in skip:
+			continue
+		else:
+			skip.append(src)
+
+		code += "(declare-const msg_in_" + src + "_valid Bool)\n"
+		code += "(declare-const msg_in_" + src + "_length Int)\n"
+		code += "(declare-const msg_in_" + src + "_ip_min Int)\n"
+		code += "(declare-const msg_in_" + src + "_ip_max Int)\n"
+		code += "(declare-const msg_in_" + src + "_ip_tag Int)\n"
+	code += "\n"
+
+	#exit()
 	return code
 
 ###############################################################################
@@ -367,6 +390,7 @@ def main():
 		)
 
 		active_routing_edges = []
+		relevant_msgs = []
 
 		# Encode reachability constraints and query
 		reachability_constraints = getReachabilityConstraints(
@@ -396,11 +420,23 @@ def main():
 			active_routing_edges,
 			devices,
 			neighbours,
-			static_routes
+			static_routes,
+			relevant_msgs
+		)
+
+		# Encode route announcements
+		route_announcement = getRouteAnnouncements(
+			active_routing_edges,
+			relevant_msgs#,
+			#devices,
+			#neighbours,
+			#static_routes
 		)
 		
-		print packetDecl + "\n" + \
+		print "(define-fun InRange ((val Int) (ub Int) (lb Int)) Bool (and (>= val lb) (<= val ub)))\n\n" + \
+		  packetDecl + "\n" + \
 			packetConstraints + "\n" + \
+			route_announcement + "\n" + \
 			route_selection + "\n" + \
 			dataplane_constraints + "\n" + \
 			reachability_constraints + "\n" + \
