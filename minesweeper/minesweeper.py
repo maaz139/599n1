@@ -68,25 +68,59 @@ def getDevices(network):
 			devices[device["Name"]].append(interface["Name"])
 	return devices
 
-def getTopologyDecl(neighbour):
-	code = ""
-	for i_src in neighbour.keys():
-		for i_dst in neighbour.keys():
-			if i_src != i_dst:
-				code += "(declare-const datafwd_" + i_src + "_" + i_dst + " Bool)\n"
-	code += "\n"
-	for i_src in neighbour.keys():
-		for i_dst in neighbour.keys():
-			if i_src != i_dst:
-				if neighbour[i_src] != i_dst:
-					code += "(assert (= datafwd_" + i_src + "_" + i_dst + " False))\n"
-	code += "\n"
-	for i_src in neighbour.keys():
-		for i_dst in neighbour.keys():
-			if i_src != i_dst:
-				if neighbour[i_src] == i_dst:
-					code += "(assert (= datafwd_" + i_src + "_" + i_dst + " True))\n"
-	return code
+def getInAcls(network):
+	acls = {}
+	for device in network["Devices"]:
+		for acl in device["Acls"]:
+			acls[(device["Name"], acl["Name"])] = acl
+
+	acl_map = {}
+	for device in network["Devices"]:
+		for interface in device["Interfaces"]:
+			acl = interface["InAcl"]
+			if acl is None:
+				acl_map[interface["Name"]] = None
+			else:
+				acl_map[interface["Name"]] = acls[(device["Name"], acl)]
+			
+	return acl_map
+	
+def getOutAcls(network):
+	acls = {}
+	for device in network["Devices"]:
+		for acl in device["Acls"]:
+			acls[(device["Name"], acl["Name"])] = acl
+
+	acl_map = {}
+	for device in network["Devices"]:
+		for interface in device["Interfaces"]:
+			acl = interface["OutAcl"]
+			if acl is None:
+				acl_map[interface["Name"]] = None
+			else:
+				acl_map[interface["Name"]] = acls[(device["Name"], acl)]
+			
+	return acl_map
+
+# def getTopologyDecl(neighbour):
+# 	code = ""
+# 	for i_src in neighbour.keys():
+# 		for i_dst in neighbour.keys():
+# 			if i_src != i_dst:
+# 				code += "(declare-const datafwd_" + i_src + "_" + i_dst + " Bool)\n"
+# 	code += "\n"
+# 	for i_src in neighbour.keys():
+# 		for i_dst in neighbour.keys():
+# 			if i_src != i_dst:
+# 				if neighbour[i_src] != i_dst:
+# 					code += "(assert (= datafwd_" + i_src + "_" + i_dst + " False))\n"
+# 	code += "\n"
+# 	for i_src in neighbour.keys():
+# 		for i_dst in neighbour.keys():
+# 			if i_src != i_dst:
+# 				if neighbour[i_src] == i_dst:
+# 					code += "(assert (= datafwd_" + i_src + "_" + i_dst + " True))\n"
+# 	return code
 
 def getPacketConstraints(dstPrefixes, srcPrefixes, protocols, dstPorts, srcPorts):
 	code = ""
@@ -117,7 +151,7 @@ def getReachabilityQuery(ingres, egress):
 
 	return code
 
-def getReachabilityConstraints(ingres, egress, devices, neighbours):
+def getReachabilityConstraints(ingres, egress, devices, neighbours, fwd_edges):
 	code = "\n;; Encoding Reachability Constraints\n";
 
 	# Declare reachability variable for each interface that is not dst
@@ -148,6 +182,7 @@ def getReachabilityConstraints(ingres, egress, devices, neighbours):
 			for interface in devices[device]:
 				if interface != connected_interface:
 					code += "(assert (= canReach_" + interface + "_" + dst + " datafwd_" + interface + "_" + connected_interface[(device, dst)] + "))\n"
+					fwd_edges.append((interface, connected_interface[(device, dst)]))
 
 	code += "\n"
 
@@ -161,8 +196,70 @@ def getReachabilityConstraints(ingres, egress, devices, neighbours):
 					if neighbours[interface2] is None:
 						continue
 					code += " (and datafwd_" + interface1 + "_" + interface2 + " canReach_" + neighbours[interface2] + "_" + dst + ")"
+					fwd_edges.append((interface1, interface2))
 				code += "))\n"
 		
+	return code
+
+def encodeRules(rules, default):
+	if len(rules) == 0:
+		if default == "Allow":
+			return "True"
+		else:
+			return "False"
+
+	rule = rules[0]
+
+	code = "(ite (and "
+
+	prefix = parsePrefix(rule["DstIp"])
+	code += "(InRange Pkt_DstIP " + prefix[0] + " " + prefix[1] + ") "
+
+	prefix = parsePrefix(rule["SrcIp"])
+	code += "(InRange Pkt_SrcIp " + prefix[0] + " " + prefix[1] + ") "
+
+	r = parseRange(rule["Protocol"])
+	code += "(InRange Pkt_Protocol " + r[0] + " " + r[1] + ") "
+
+	r = parseRange(rule["DstPort"])
+	code += "(InRange Pkt_DstPort " + r[0] + " " + r[1] + ") "
+
+	r = parseRange(rule["SrcPort"])
+	code += "(InRange Pkt_SrcPort " + r[0] + " " + r[1] + ")) "
+
+	code += "True " if rule["Action"] == "Allow" else "False "
+	code += encodeRules(rules[1:], default) + ")"
+
+	return code
+
+def getDataplaneConstraints(fwd_edges, neighbours, in_acls, out_acls):
+	code = "\n;; Encoding Dataplane Constraints\n";
+
+	for edge in fwd_edges:
+		in_acl = in_acls[edge[0]]
+		out_acl = out_acls[edge[1]]
+		code += "(declare-const datafwd_" + edge[0] + "_" + edge[1] + " Bool)\n"
+	code += "\n"
+
+	for edge in fwd_edges:
+		in_acl = in_acls[edge[0]]
+		out_acl = out_acls[edge[1]]
+		postfix = "_" + edge[0] + "_" + edge[1]
+
+		inAclEncoding = ""
+		if in_acl is None:
+			inAclEncoding = "True"
+		else:
+			inAclEncoding = encodeRules(in_acl["Rules"], in_acl["DefaultAction"])
+
+		outAclEncoding = ""
+		if out_acl is None:
+			outAclEncoding = "True"
+		else:
+			outAclEncoding = encodeRules(out_acl["Rules"], out_acl["DefaultAction"])
+
+		code += "(assert (= datafwd" + postfix + " (and ctrlfwd" + postfix + " " + inAclEncoding + " " + outAclEncoding + ")))\n"
+
 	return code
 
 ###############################################################################
@@ -185,9 +282,11 @@ def main():
 	# Parse network
 	devices = getDevices(network_config)
 	neighbours = getNeighbours(network_config)
+	in_acls = getInAcls(network_config)
+	out_acls = getOutAcls(network_config)
 
+	# Generate z3 code
 	packetDecl = getPacketDecl()
-	topologyDecl = getTopologyDecl(neighbours)
 
 	for invariant in invariants['Reachability']:
 		# Get packet constraints
@@ -199,12 +298,15 @@ def main():
 			[parseRange(r) for r in invariant["SrcPort"]]
 		)
 
+		active_routing_edges = []
+
 		# Encode reachability constraints and query
 		reachability_constraints = getReachabilityConstraints(
 			invariant["Ingress"], 
 			invariant["Egress"],
 			devices,
-			neighbours
+			neighbours,
+			active_routing_edges
 		)
 
 		# Encode reachability query
@@ -214,10 +316,16 @@ def main():
 		)
 
 		# Encode data-plane constraints
-		dataplane_constraints = getDataplaneConstraints
+		dataplane_constraints = getDataplaneConstraints(
+			active_routing_edges,
+			neighbours,
+			in_acls,
+			out_acls
+		)
 		
 		print packetDecl + "\n" + \
 			packetConstraints + "\n" + \
+			dataplane_constraints + "\n" + \
 			reachability_constraints + "\n" + \
 			query
 		
